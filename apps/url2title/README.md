@@ -40,6 +40,18 @@ python src/server.py [ポート番号]
 
 起動後、ブラウザで `http://localhost:8080` にアクセスし、フォームに URL を入力してタイトルを取得できます。
 
+JSON API を使う場合は、`/api/title` に `url` クエリパラメータを指定してアクセスします。
+
+```sh
+curl --get 'http://localhost:8080/api/title' --data-urlencode 'url=https://example.com'
+```
+
+レスポンス例:
+
+```json
+{"ok": true, "url": "https://example.com", "title": "Example Domain"}
+```
+
 #### 起動例
 
 ```sh

@@ -2,6 +2,7 @@
 """URLを入力するとそのページのタイトルを返す Web アプリ"""
 
 import os
+import json
 import sys
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -50,6 +51,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_index()
         elif parsed.path == "/title":
             self._serve_title(parsed.query)
+        elif parsed.path == "/api/title":
+            self._serve_api_title(parsed.query)
         else:
             self._not_found()
 
@@ -76,6 +79,38 @@ class Handler(BaseHTTPRequestHandler):
             body = HTML_TEMPLATE.format(result=result).encode("utf-8")
             self._send_html(500, body)
 
+    def _serve_api_title(self, query):
+        params = urllib.parse.parse_qs(query)
+        url = params.get("url", [""])[0].strip()
+        if not url:
+            self._send_json(
+                400,
+                {
+                    "ok": False,
+                    "error": "url クエリパラメータを指定してください",
+                },
+            )
+            return
+
+        try:
+            title = fetch_title(url)
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "url": url,
+                    "title": title,
+                },
+            )
+        except RuntimeError as e:
+            self._send_json(
+                500,
+                {
+                    "ok": False,
+                    "error": str(e),
+                },
+            )
+
     def _not_found(self):
         body = b"Not Found"
         try:
@@ -91,6 +126,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # クライアント切断時はサーバー側で例外を握りつぶす。
+            return
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
