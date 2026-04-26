@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>時計</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #1a1a2e;
+      color: #eaeaea;
+      font-family: 'Segoe UI', sans-serif;
+      gap: 32px;
+      padding: 24px;
+    }
+
+    h1 { font-size: 1.6rem; letter-spacing: 0.05em; color: #a0c4ff; }
+
+    /* ─── タイムゾーン選択 ─── */
+    .tz-selector {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
+    }
+    .tz-selector label { color: #a0c4ff; }
+    .tz-selector select {
+      background: #16213e;
+      color: #eaeaea;
+      border: 1px solid #a0c4ff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    /* ─── 時計コンテナ ─── */
+    .clocks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 40px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ─── アナログ時計 ─── */
+    canvas#analog {
+      display: block;
+      border-radius: 50%;
+      box-shadow: 0 0 32px rgba(160, 196, 255, 0.3);
+    }
+
+    /* ─── デジタル時計 ─── */
+    .digital {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .digital .time {
+      font-size: 4rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.06em;
+      color: #a0c4ff;
+      text-shadow: 0 0 12px rgba(160, 196, 255, 0.6);
+    }
+    .digital .date {
+      font-size: 1.1rem;
+      color: #888;
+    }
+    .digital .tz-label {
+      font-size: 0.9rem;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>🕐 時計</h1>
+
+  <div class="tz-selector">
+    <label for="tz">タイムゾーン:</label>
+    <select id="tz"></select>
+  </div>
+
+  <div class="clocks">
+    <canvas id="analog" width="260" height="260"></canvas>
+
+    <div class="digital">
+      <div class="time" id="dtime">--:--:--</div>
+      <div class="date" id="ddate">----/--/-- (--)</div>
+      <div class="tz-label" id="dtz"></div>
+    </div>
+  </div>
+
+  <script>
+    /* ======================================================
+       タイムゾーン一覧
+       日本(Asia/Tokyo)をデフォルトとし、主要タイムゾーンを列挙。
+       ====================================================== */
+    const TIMEZONES = [
+      { label: "日本 (JST, UTC+9)",          value: "Asia/Tokyo" },
+      { label: "UTC",                          value: "UTC" },
+      { label: "ロンドン (GMT/BST)",           value: "Europe/London" },
+      { label: "パリ (CET/CEST)",             value: "Europe/Paris" },
+      { label: "ニューヨーク (EST/EDT)",       value: "America/New_York" },
+      { label: "シカゴ (CST/CDT)",            value: "America/Chicago" },
+      { label: "ロサンゼルス (PST/PDT)",      value: "America/Los_Angeles" },
+      { label: "上海 (CST, UTC+8)",           value: "Asia/Shanghai" },
+      { label: "香港 (HKT, UTC+8)",           value: "Asia/Hong_Kong" },
+      { label: "シンガポール (SGT, UTC+8)",   value: "Asia/Singapore" },
+      { label: "ドバイ (GST, UTC+4)",         value: "Asia/Dubai" },
+      { label: "シドニー (AEST/AEDT)",        value: "Australia/Sydney" },
+      { label: "オークランド (NZST/NZDT)",    value: "Pacific/Auckland" },
+    ];
+
+    /* ─── セレクト初期化 ─── */
+    const tzSelect = document.getElementById("tz");
+    TIMEZONES.forEach(tz => {
+      const opt = document.createElement("option");
+      opt.value = tz.value;
+      opt.textContent = tz.label;
+      if (tz.value === "Asia/Tokyo") opt.selected = true;
+      tzSelect.appendChild(opt);
+    });
+
+    /* ─── 現在のタイムゾーンを返す関数 ─── */
+    function currentTZ() { return tzSelect.value; }
+
+    /* ─── 指定タイムゾーンの「今」を分解して返す ─── */
+    function nowInTZ(tz) {
+      const now = new Date();
+      const fmt = (field, opts) =>
+        parseInt(new Intl.DateTimeFormat("en-US", { ...opts, timeZone: tz }).format(now), 10);
+
+      const hour   = fmt("hour",   { hour: "numeric",   hour12: false });
+      const minute = fmt("minute", { minute: "numeric" });
+      const second = fmt("second", { second: "numeric" });
+
+      // 表示用文字列
+      const timeStr = [hour, minute, second]
+        .map(n => String(n).padStart(2, "0")).join(":");
+
+      const dateStr = new Intl.DateTimeFormat("ja-JP", {
+        timeZone: tz,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        weekday: "short",
+      }).format(now);
+
+      const tzLabel = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "shortOffset",
+      }).format(now).split(", ").pop() ?? tz;
+
+      return { hour, minute, second, timeStr, dateStr, tzLabel };
+    }
+
+    /* ======================================================
+       アナログ時計
+       ====================================================== */
+    const canvas = document.getElementById("analog");
+    const ctx    = canvas.getContext("2d");
+    const CX     = canvas.width  / 2;
+    const CY     = canvas.height / 2;
+    const R      = CX - 10;   // 外周半径
+
+    function drawAnalog({ hour, minute, second }) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 文字盤背景
+      ctx.beginPath();
+      ctx.arc(CX, CY, R, 0, 2 * Math.PI);
+      ctx.fillStyle = "#16213e";
+      ctx.fill();
+      ctx.strokeStyle = "#a0c4ff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 目盛り
+      for (let i = 0; i < 60; i++) {
+        const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
+        const isHour = i % 5 === 0;
+        const inner = R * (isHour ? 0.82 : 0.90);
+        const outer = R * 0.97;
+        ctx.beginPath();
+        ctx.moveTo(CX + inner * Math.cos(angle), CY + inner * Math.sin(angle));
+        ctx.lineTo(CX + outer * Math.cos(angle), CY + outer * Math.sin(angle));
+        ctx.strokeStyle = isHour ? "#a0c4ff" : "#445";
+        ctx.lineWidth   = isHour ? 2 : 1;
+        ctx.stroke();
+      }
+
+      // 数字（12, 3, 6, 9）
+      ctx.fillStyle = "#a0c4ff";
+      ctx.font      = `bold ${Math.round(R * 0.14)}px sans-serif`;
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+      [12, 3, 6, 9].forEach(n => {
+        const angle = ((n / 12) * 2 * Math.PI) - Math.PI / 2;
+        const nr = R * 0.70;
+        ctx.fillText(String(n), CX + nr * Math.cos(angle), CY + nr * Math.sin(angle));
+      });
+
+      // 針を描画するヘルパー
+      function drawHand(angleDeg, length, width, color) {
+        const angle = (angleDeg / 360) * 2 * Math.PI - Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(CX, CY);
+        ctx.lineTo(
+          CX + length * Math.cos(angle),
+          CY + length * Math.sin(angle),
+        );
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = width;
+        ctx.lineCap     = "round";
+        ctx.stroke();
+      }
+
+      // 時針（12時間 + 分による補正）
+      const hourAngle   = ((hour % 12) / 12 + minute / 720) * 360;
+      // 分針
+      const minuteAngle = (minute / 60 + second / 3600) * 360;
+      // 秒針
+      const secondAngle = (second / 60) * 360;
+
+      drawHand(hourAngle,   R * 0.50, 5, "#eaeaea");
+      drawHand(minuteAngle, R * 0.72, 3, "#a0c4ff");
+      drawHand(secondAngle, R * 0.85, 1.5, "#ff6b6b");
+
+      // 中心点
+      ctx.beginPath();
+      ctx.arc(CX, CY, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = "#ff6b6b";
+      ctx.fill();
+    }
+
+    /* ======================================================
+       デジタル時計
+       ====================================================== */
+    const dtimeEl = document.getElementById("dtime");
+    const ddateEl = document.getElementById("ddate");
+    const dtzEl   = document.getElementById("dtz");
+
+    function drawDigital({ timeStr, dateStr, tzLabel }) {
+      dtimeEl.textContent = timeStr;
+      ddateEl.textContent = dateStr;
+      dtzEl.textContent   = tzLabel;
+    }
+
+    /* ======================================================
+       メインループ（1秒ごとに更新）
+       ====================================================== */
+    function tick() {
+      const t = nowInTZ(currentTZ());
+      drawAnalog(t);
+      drawDigital(t);
+    }
+
+    tick();
+    setInterval(tick, 1000);
+
+    // タイムゾーン変更時も即座に更新
+    tzSelect.addEventListener("change", tick);
+  </script>
+</body>
+</html>
